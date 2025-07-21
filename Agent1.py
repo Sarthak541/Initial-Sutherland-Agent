@@ -19,6 +19,7 @@ LLM_TEMPERATURE = 0
 CHROMA_DB_BASE_DIR = "chroma_dbs_gemini" # Base directory for ChromaDB (renamed for Gemini)
 
 
+EXTRACTED_STRUCTURES = []
 
 
 # Pydantic Data Models
@@ -71,3 +72,4 @@ def query_vector_store(paper_id: str, metadata_filter: Dict[str, str]) -> List[s
         if doc["metadata"].get(filter_key) == filter_value
     ]
     return results
+
