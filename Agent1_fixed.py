@@ -1,64 +1,57 @@
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-# --- Pydantic for data models ---
 from pydantic.v1 import BaseModel, Field
 
-# --- LangChain Imports ---
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor, StructuredChatAgent
 from langchain.tools import tool
 from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, MessagesPlaceholder
+from langchain_chroma import Chroma
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-# --- 1. SETUP & CONFIGURATION ---
-apikey = os.environ.get("GOOGLE_API_KEY")
+# Setup
+aipikey = os.environ.get("GOOGLE_API_KEY")
+
+CHROMA_PATH = "chroma_db_structured"
+embeddings_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
+vector_store = Chroma(
+    persist_directory=CHROMA_PATH,
+    embedding_function=embeddings_model,
+    collection_name="structured_paper_collection"
+)
 
 EXTRACTED_STRUCTURES = []
 
-# --- 2. MOCK DATABASE (Simplified) ---
-# The mock store no longer needs a paper_id key.
-MOCK_VECTOR_STORE = [
-    {"page_content": "A Deep Dive into Multi-Agent Systems", "metadata": {"type": "title"}},
-    {"page_content": "Alex Doe", "metadata": {"type": "author"}},
-    {"page_content": "Brenda Smith", "metadata": {"type": "author"}},
-    {"page_content": "Published at the International Conference on AI (ICAI), 2025", "metadata": {"type": "publication_info"}},
-    {"page_content": "1. Introduction", "metadata": {"type": "section_header"}},
-    {"page_content": "2. Related Work", "metadata": {"type": "section_header"}},
-    {"page_content": "3. Methodology", "metadata": {"type": "section_header"}},
-    {"page_content": "3.1 System Architecture", "metadata": {"type": "subsection_header"}},
-    {"page_content": "3.2 Agent Communication Protocol", "metadata": {"type": "subsection_header"}},
-    {"page_content": "4. Results", "metadata": {"type": "section_header"}},
-    {"page_content": "5. Conclusion", "metadata": {"type": "section_header"}},
-]
 
-
-# --- 3. PYDANTIC DATA MODEL (Simplified) ---
+# Pydantic Data Model
 class PaperStructure(BaseModel):
     """Data model for the explicitly stated structure and metadata of a paper."""
     title: str = Field(..., description="The full, complete title of the research paper.")
     authors: List[str] = Field(..., description="A list of all author names found on the title page.")
-    publication_year: int = Field(..., description="The year the paper was published.")
-    conference: str = Field(..., description="The conference or journal where the paper was published.")
-    sections: List[Dict[str, Any]] = Field(..., description="A nested list of all sections and subsections.")
+    publication_year: Optional[int] = Field(None, description="The year the paper was published, if found.")
+    conference: Optional[str] = Field(None, description="The conference or journal where the paper was published, if found.")
+    sections: List[Dict[str, Any]] = Field(..., description="A nested list of all sections and their subsections. Example: [{'section_title': 'Methodology', 'subsections': ['System Architecture', 'Agent Protocol']}]")
 
-# --- 4. TOOL IMPLEMENTATION (Simplified) ---
+
+# Defining Tools
 @tool
-def query_vector_store(metadata_filter: Dict[str, str]) -> List[str]:
+def query_vector_store(text_query: str, metadata_filter: Optional[Dict[str, str]] = None) -> List[str]:
     """
-    Directly queries the paper's vector store using a metadata filter.
-    To get the title, use the filter {'type': 'title'}.
-    To get authors, use {'type': 'author'}.
-    To get section headers, use {'type': 'section_header'}.
+    Searches the vector store. Can be used with a text query, a metadata filter, or both.
+    To find structural elements like the title, use a generic query like "*" and a specific filter.
+    To find specific concepts, use a descriptive text query.
     """
-    print(f"--- 🔎 TOOL: Directly querying with filter: {metadata_filter} ---")
-    filter_key = list(metadata_filter.keys())[0]
-    filter_value = list(metadata_filter.values())[0]
+    print(f"Querying with text='{text_query}' and filter={metadata_filter}")
     
-    results = [
-        doc["page_content"] for doc in MOCK_VECTOR_STORE
-        if doc["metadata"].get(filter_key) == filter_value
-    ]
-    return results
+    # The ChromaDB client handles the case where filter is None
+    docs = vector_store.similarity_search(
+        query=text_query,
+        filter=metadata_filter
+    )
+    
+    return [doc.page_content for doc in docs]
 
 @tool(args_schema=PaperStructure)
 def record_paper_structure(data: PaperStructure) -> str:
@@ -67,7 +60,7 @@ def record_paper_structure(data: PaperStructure) -> str:
     EXTRACTED_STRUCTURES.append(data)
     return "Successfully recorded the paper's structure."
 
-# --- 5. AGENT AND EXECUTOR CREATION ---
+# Creating Agent
 tools = [
     query_vector_store,
     record_paper_structure,
@@ -77,18 +70,21 @@ prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are an Extractor Agent. Your job is to find explicit facts by directly querying a vector store and then record them.
+            """You are an Extractor Agent responsible for finding a paper's structure and metadata. You do not summarize or infer.
 
-            Your process is:
-            1. Use the `query_vector_store` tool multiple times to get all the pieces of information you need. You must learn to use the correct `metadata_filter` to get each piece of data.
-               - To get the title, use `{'type': 'title'}`.
-               - To get authors, use `{'type': 'author'}`.
-               - To get publication info, use `{'type': 'publication_info'}`.
-               - To get main section titles, use `{'type': 'section_header'}`.
-               - To get subsection titles, use `{'type': 'subsection_header'}`.
-            2. After you have retrieved all the parts, assemble the complete structure.
-            3. Make a SINGLE call to the `record_paper_structure` tool to save the final, complete result.
-            4. Do not summarize or infer. Your task is complete after the single record call."""
+            You have one primary tool: `query_vector_store`. It takes two arguments: a `text_query` (for semantic searching) and an optional `metadata_filter`.
+
+            Here is your strategy:
+            - **To find structural elements (like the paper's main title or all section headers):** Use a generic `text_query` like "*" or "document" combined with a specific `metadata_filter` (e.g., `{'category': 'Title'}`).
+            - **To find specific information (like authors or publication details):** Use a descriptive `text_query` (e.g., `text_query='authors and affiliations'`).
+
+            Your step-by-step process is:
+            1.  Find the main title of the paper using the metadata filter strategy.
+            2.  Find the authors and publication details using the text query strategy.
+            3.  Get all section and subsection titles using the metadata filter strategy.
+            4.  Analyze the list of retrieved titles to determine the paper's hierarchy (e.g., '3. Methods' vs '3.1. Data Collection').
+            5.  Once all information is gathered, assemble the complete `PaperStructure` object.
+            6.  Make a SINGLE call to the `record_paper_structure` tool to save the final result."""
         ),
         HumanMessagePromptTemplate.from_template("{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -99,16 +95,16 @@ llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0, conve
 agent = StructuredChatAgent.from_llm_and_tools(llm=llm, tools=tools, prompt=prompt)
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
 
-# --- 6. RUNNING THE AGENT ---
+
+# Running the Agent
 if __name__ == "__main__":
-    print("🚀 Starting Agent 1 (Simplified)...")
-    task = "Extract and record the full structure and metadata for the paper by querying the vector store directly."
+    print("Starting Agent 1: The Extractor (Hierarchical Mode)...")
+    task = "Extract and record the full hierarchical structure (sections and subsections) and metadata for the paper."
 
     result = agent_executor.invoke({"input": task})
 
-    print("\n\n✅ Agent 1 finished its work.")
-    print("------------------------------------------")
-    print("📊 FINAL EXTRACTED STRUCTURE:")
+    print("\n\nAgent 1 finished its work.")
+    print("FINAL EXTRACTED STRUCTURE:")
     print("------------------------------------------")
 
     for item in EXTRACTED_STRUCTURES:
