@@ -1,0 +1,10 @@
+The title of the document is "Enhancing QuickSort Algorithm using a Dynamic Pivot Selection Technique". The document is structured into several sections, including:
+
+1. Abstract
+2. Introduction
+3. Dynamic Pivot Selection Technique
+4. Performance Analysis
+5. Experimental Analysis
+6. Conclusion
+
+The subject area of this document is computer science, specifically focusing on algorithms and data structures, with a particular emphasis on sorting algorithms.

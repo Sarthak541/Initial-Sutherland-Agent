@@ -80,4 +80,3 @@ def stream_response(message):
 # Test it
 first_message = "What is the title of the PDF?  Only return the title/heading"
 print(stream_response(first_message))
-

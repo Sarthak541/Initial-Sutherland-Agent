@@ -1,3 +1,6 @@
 .env
 
-chroma_db
+chroma_db_structured
+
+__pycache__
+

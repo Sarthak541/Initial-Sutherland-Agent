@@ -1,7 +1,9 @@
 import os
 from typing import List, Dict, Any, Optional
 
-from pydantic.v1 import BaseModel, Field
+from dotenv import load_dotenv 
+
+from pydantic import BaseModel, Field
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor, StructuredChatAgent
@@ -11,8 +13,7 @@ from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # Setup
-aipikey = os.environ.get("GOOGLE_API_KEY")
-
+load_dotenv()
 CHROMA_PATH = "chroma_db_structured"
 embeddings_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
